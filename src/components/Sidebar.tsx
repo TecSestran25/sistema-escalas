@@ -23,7 +23,7 @@ import {
   DropdownMenuPortal,
 } from "@/components/ui/dropdown-menu";
 import {
-  Users, ShieldCheck, Building, Calendar, Settings, LogOut, Sun, Moon, FileText, UserX, Clock
+  Users, ShieldCheck, Building, Calendar, Settings, LogOut, Sun, Moon, FileText, UserX, Clock, Repeat
 } from "lucide-react";
 
 const navLinks = [
@@ -33,6 +33,7 @@ const navLinks = [
   { href: "/usuarios", label: "Utilizadores", icon: Users },
   { href: "/ausencias", label: "Ausências", icon: UserX },
   { href: "/banco-horas", label: "Banco de Horas", icon: Clock },
+  { href: "/trocas", label: "Trocas de Turno", icon: Repeat },
   { href: "/templates_escalas", label: "Templates", icon: FileText },
   { href: "/configuracoes", label: "Configurações", icon: Settings },
 ];
