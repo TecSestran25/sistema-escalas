@@ -3,7 +3,7 @@
 "use client";
 
 import React, { useState, useMemo } from "react";
-import { format, startOfWeek, addDays, subDays, isSameDay } from "date-fns";
+import { format, startOfWeek, addDays, subDays, isSameDay, isWithinInterval, endOfDay } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { DndContext, DragEndEvent, DragStartEvent, DragOverlay } from "@dnd-kit/core";
 
@@ -21,20 +21,27 @@ interface Posto { id: string; name: string;  dotação: number;}
 interface Vigilante { id:string; name: string; matricula: string; }
 interface Turno { id: string; postoId: string; vigilanteId?: string; startDateTime: string; endDateTime: string; }
 interface Template { id: string; name: string; }
+interface Ausencia {
+    vigilanteId: string;
+    dataInicio: string;
+    dataFim: string;
+}
 interface EscalaGridProps {
     postos: Posto[];
     vigilantesIniciais: Vigilante[];
     turnosIniciais: Turno[];
     templates: Template[];
+    ausenciasIniciais: Ausencia[];
 }
 
-export function EscalaGrid({ postos, vigilantesIniciais, turnosIniciais, templates }: EscalaGridProps) {
+export function EscalaGrid({ postos, vigilantesIniciais, turnosIniciais, templates, ausenciasIniciais }: EscalaGridProps) {
     const [currentDate, setCurrentDate] = useState(new Date());
     const [isDialogOpen, setIsDialogOpen] = useState(false);
-    const [turnos, setTurnos] = useState(turnosIniciais);
-    const [vigilantes, setVigilantes] = useState(vigilantesIniciais);
-    const [activeVigilante, setActiveVigilante] = useState<Vigilante | null>(null);
     const [isPreenchimentoOpen, setIsPreenchimentoOpen] = useState(false);
+    const [activeVigilante, setActiveVigilante] = useState<Vigilante | null>(null);
+    const [vigilantes, setVigilantes] = useState(vigilantesIniciais);
+    const [turnos, setTurnos] = useState(turnosIniciais);
+    const [ausencias, setAusencias] = useState(ausenciasIniciais);
 
     const startOfTheWeek = startOfWeek(currentDate, { locale: ptBR });
     const daysOfWeek = Array.from({ length: 7 }).map((_, i) => addDays(startOfTheWeek, i));
@@ -179,7 +186,42 @@ export function EscalaGrid({ postos, vigilantesIniciais, turnosIniciais, templat
                                             )}
                                             {turnosNestePosto.map((turno) => {
                                                 const vigilanteAlocado = vigilantes.find(v => v.id === turno.vigilanteId);
-                                                return (<TurnoCard key={turno.id} turno={turno} vigilanteAlocado={vigilanteAlocado} />);
+                                                
+                                                // ---- INÍCIO DO CÓDIGO DE DEPURAÇÃO ----
+                                                if (vigilanteAlocado?.name === "Bruno") {
+                                                    console.log("--- A VERIFICAR AUSÊNCIA PARA O TURNO DO BRUNO ---");
+                                                    console.log("Data do Turno:", new Date(turno.startDateTime));
+
+                                                    ausenciasIniciais.forEach(a => {
+                                                        if (a.vigilanteId === vigilanteAlocado.id) {
+                                                            const intervalo = {
+                                                                start: new Date(a.dataInicio),
+                                                                end: endOfDay(new Date(a.dataFim))
+                                                            };
+                                                            console.log("Intervalo de Ausência:", intervalo);
+                                                            console.log("O turno está dentro do intervalo?", isWithinInterval(new Date(turno.startDateTime), intervalo));
+                                                        }
+                                                    });
+                                                    console.log("-------------------------------------------------");
+                                                }
+                                                // ---- FIM DO CÓDIGO DE DEPURAÇÃO ----
+
+                                                const isAusente = vigilanteAlocado ? ausenciasIniciais.some(a => 
+                                                    a.vigilanteId === vigilanteAlocado.id &&
+                                                    isWithinInterval(new Date(turno.startDateTime), {
+                                                        start: new Date(a.dataInicio),
+                                                        end: endOfDay(new Date(a.dataFim))
+                                                    })
+                                                ) : false;
+
+                                                return (
+                                                    <TurnoCard 
+                                                        key={turno.id} 
+                                                        turno={turno} 
+                                                        vigilanteAlocado={vigilanteAlocado}
+                                                        isAusente={isAusente}
+                                                    />
+                                                );
                                             })}
                                         </GridCell>
                                     );

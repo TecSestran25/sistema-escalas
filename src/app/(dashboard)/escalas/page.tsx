@@ -21,13 +21,19 @@ interface Turno {
     id: string;
     postoId: string;
     vigilanteId?: string;
-    startDateTime: Timestamp;
-    endDateTime: Timestamp;
+    startDateTime: string; // Já está como string ISO
+    endDateTime: string;
 }
 // Interface para o Template
 interface Template {
     id: string;
     name: string;
+}
+interface Ausencia {
+    id: string;
+    vigilanteId: string;
+    dataInicio: Timestamp;
+    dataFim: Timestamp;
 }
 
 // Função para buscar os postos
@@ -81,23 +87,52 @@ async function getTemplates(): Promise<Template[]> {
     return querySnapshot.docs.map(doc => ({ id: doc.id, name: doc.data().name } as Template));
 }
 
+// NOVA FUNÇÃO PARA BUSCAR AUSÊNCIAS
+async function getAusencias(date: Date): Promise<Ausencia[]> { // Retorna 'any' para flexibilidade na conversão
+    const start = startOfWeek(date, { locale: ptBR });
+    const end = endOfWeek(date, { locale: ptBR });
+
+    const ausenciasCollection = collection(firestore, "ausencias");
+    const q = query(ausenciasCollection,
+        where('dataFim', '>=', Timestamp.fromDate(start)),
+        where('dataInicio', '<=', Timestamp.fromDate(end))
+    );
+    const querySnapshot = await getDocs(q);
+    
+    // Convertemos os Timestamps para strings ISO durante a busca dos dados
+    return querySnapshot.docs.map(doc => {
+        const data = doc.data();
+        return {
+            id: doc.id,
+            vigilanteId: data.vigilanteId,
+            dataInicio: data.dataInicio.toDate().toISOString(),
+            dataFim: data.dataFim.toDate().toISOString(),
+        }
+    });
+}
+
+
+
 export default async function EscalasPage() {
   const today = new Date();
   // 2. AGORA O PROMISE.ALL INCLUI A CHAMADA CORRETA PARA getTemplates
-  const [postos, vigilantes, turnos, templates] = await Promise.all([
+  const [postos, vigilantes, turnos, templates, ausencias] = await Promise.all([
     getPostos(),
     getVigilantes(),
     getTurnos(today),
     getTemplates(),
+    getAusencias(today),
   ]);
 
-  return (
+   return (
     <div className="flex flex-col h-full">
       <EscalaGrid
         postos={postos}
         vigilantesIniciais={vigilantes}
-        turnosIniciais={JSON.parse(JSON.stringify(turnos))}
-        templates={templates} // E os templates são passados como uma propriedade válida
+        turnosIniciais={turnos}
+        templates={templates}
+        // Passa as ausências para a grelha (convertendo Timestamps)
+        ausenciasIniciais={JSON.parse(JSON.stringify(ausencias))}
       />
     </div>
   );
