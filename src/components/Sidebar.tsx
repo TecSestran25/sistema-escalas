@@ -23,15 +23,18 @@ import {
   DropdownMenuPortal,
 } from "@/components/ui/dropdown-menu";
 import {
-  Users, ShieldCheck, Building, Calendar, Settings, LogOut, Sun, Moon, FileText, UserX
+  Users, ShieldCheck, Building, Calendar, Settings, LogOut, Sun, Moon, FileText, UserX, Clock, Repeat, LayoutDashboard
 } from "lucide-react";
 
 const navLinks = [
+  { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/escalas", label: "Escalas", icon: Calendar },
   { href: "/postos", label: "Postos", icon: Building },
   { href: "/vigilantes", label: "Vigilantes", icon: ShieldCheck },
   { href: "/usuarios", label: "Utilizadores", icon: Users },
   { href: "/ausencias", label: "Ausências", icon: UserX },
+  { href: "/banco-horas", label: "Banco de Horas", icon: Clock },
+  { href: "/trocas", label: "Trocas de Turno", icon: Repeat },
   { href: "/templates_escalas", label: "Templates", icon: FileText },
   { href: "/configuracoes", label: "Configurações", icon: Settings },
 ];
