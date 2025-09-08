@@ -23,10 +23,11 @@ import {
   DropdownMenuPortal,
 } from "@/components/ui/dropdown-menu";
 import {
-  Users, ShieldCheck, Building, Calendar, Settings, LogOut, Sun, Moon, FileText, UserX, Clock, Repeat
+  Users, ShieldCheck, Building, Calendar, Settings, LogOut, Sun, Moon, FileText, UserX, Clock, Repeat, LayoutDashboard
 } from "lucide-react";
 
 const navLinks = [
+  { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/escalas", label: "Escalas", icon: Calendar },
   { href: "/postos", label: "Postos", icon: Building },
   { href: "/vigilantes", label: "Vigilantes", icon: ShieldCheck },
