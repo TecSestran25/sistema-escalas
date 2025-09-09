@@ -2,61 +2,63 @@
 "use server";
 
 import { z } from "zod";
-import { firestore } from "@/lib/firebase";
-import { collection, addDoc } from "firebase/firestore";
 import { revalidatePath } from "next/cache";
-import { redirect } from "next/navigation";
+import { adminAuth, adminFirestore } from "@/lib/firebaseAdmin"; // Usar o Admin SDK
 
-// Esquema de validação para o formulário de usuário
 const UserSchema = z.object({
-  name: z.string().min(3, { message: "O nome é obrigatório." }),
-  email: z.email({ message: "Por favor, insira um e-mail válido." }),
-  role: z.enum(['admin', 'user'], { message: "Selecione um perfil." }),
-  // --- NOVOS CAMPOS ADICIONADOS AQUI ---
-  cpf: z.string().min(11, { message: "CPF deve ter no mínimo 11 dígitos." }),
-  telefone: z.string().optional(), // Opcional, o usuário não precisa preencher
+    name: z.string().min(3, "O nome é obrigatório."),
+    email: z.string().email("E-mail inválido."),
+    password: z.string().min(6, "A senha deve ter no mínimo 6 caracteres."),
+    role: z.enum(['admin', 'supervisor', 'operator']),
+    cpf: z.string().min(11, "CPF inválido."),
+    telefone: z.string().optional(),
+    isActive: z.boolean(),
 });
 
-// Tipagem para o estado do formulário (adicionamos os novos campos de erro)
-export type UserState = {
-  errors?: {
-    name?: string[];
-    email?: string[];
-    role?: string[];
-    // --- NOVOS CAMPOS DE ERRO ---
-    cpf?: string[];
-    telefone?: string[];
-  };
-  message?: string | null;
-};
+// A assinatura da função PRECISA ter o 'prevState' para funcionar com useActionState
+export async function createUser(prevState: any, formData: FormData) {
+    const isActive = formData.get('isActive') === 'on';
+    
+    // Usamos Object.fromEntries para converter o FormData num objeto
+    const validatedFields = UserSchema.safeParse({
+        ...Object.fromEntries(formData.entries()),
+        isActive,
+    });
 
-export async function createUser(prevState: UserState, formData: FormData) {
-  const validatedFields = UserSchema.safeParse({
-    name: formData.get("name"),
-    email: formData.get("email"),
-    role: formData.get("role"),
-    // --- LENDO OS NOVOS CAMPOS DO FORMDATA ---
-    cpf: formData.get("cpf"),
-    telefone: formData.get("telefone"),
-  });
+    if (!validatedFields.success) {
+        // Retornar os erros de forma estruturada
+        return { success: false, message: "Dados do formulário inválidos.", errors: validatedFields.error.flatten().fieldErrors };
+    }
 
-  if (!validatedFields.success) {
-    return {
-      errors: validatedFields.error.flatten().fieldErrors,
-      message: "Erro de validação. Corrija os campos.",
-    };
-  }
+    const { email, password, name, role, cpf, telefone } = validatedFields.data;
 
-  try {
-    // Salvando os dados validados (que agora incluem cpf e telefone)
-    await addDoc(collection(firestore, "users"), validatedFields.data);
-  } catch (e) {
-    return {
-      message: "Erro no banco de dados: Não foi possível criar o usuário.",
-      error: e,
-    };
-  }
+    try {
+        // 1. Criar o utilizador no Firebase Authentication
+        const userRecord = await adminAuth.createUser({
+            email,
+            password,
+            displayName: name,
+            disabled: !isActive,
+        });
 
-  revalidatePath("/usuarios");
-  redirect("/usuarios");
+        // 2. Criar o perfil do utilizador no Firestore
+        await adminFirestore.collection("users").doc(userRecord.uid).set({
+            name,
+            email,
+            role,
+            cpf,
+            telefone: telefone || "",
+            isActive,
+        });
+
+    } catch (error: any) {
+        if (error.code === 'auth/email-already-exists') {
+            return { success: false, message: "Este e-mail já está a ser utilizado." };
+        }
+        console.error("Erro ao criar utilizador:", error);
+        return { success: false, message: "Ocorreu um erro no servidor." };
+    }
+
+    revalidatePath("/usuarios");
+    return { success: true, message: "Utilizador criado com sucesso!" };
 }
