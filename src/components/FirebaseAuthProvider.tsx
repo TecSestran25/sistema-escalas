@@ -3,14 +3,23 @@
 
 import { useState, useEffect, createContext, useContext } from "react";
 import { getAuth, onAuthStateChanged, User } from "firebase/auth";
-import { app } from "@/lib/firebase";
+import { doc, getDoc } from "firebase/firestore";
+import { app, firestore } from "@/lib/firebase";
+
+interface UserProfile {
+    uid: string;
+    name: string;
+    email: string;
+    role: 'admin' | 'supervisor' | 'operator';
+}
 
 const auth = getAuth(app);
 
 // 1. ATUALIZAR O CONTEXTO PARA INCLUIR O ESTADO DE 'loading'
-const AuthContext = createContext<{ user: User | null; loading: boolean }>({
+const AuthContext = createContext<{ user: User | null; userProfile: UserProfile | null; loading: boolean }>({
   user: null,
-  loading: true, // Começa como 'true'
+  userProfile: null,
+  loading: true,
 });
 
 export const useFirebaseAuth = () => useContext(AuthContext);
@@ -21,25 +30,31 @@ export default function FirebaseAuthProvider({
   children: React.ReactNode;
 }) {
   const [user, setUser] = useState<User | null>(null);
-  const [loading, setLoading] = useState(true); // 2. ADICIONAR ESTADO DE 'loading'
+  const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
       if (user) {
         setUser(user);
+        // Se houver um utilizador, vamos buscar o seu perfil no Firestore
+        const userDocRef = doc(firestore, "users", user.uid);
+        const userDoc = await getDoc(userDocRef);
+        if (userDoc.exists()) {
+            setUserProfile({ uid: user.uid, ...userDoc.data() } as UserProfile);
+        }
       } else {
         setUser(null);
+        setUserProfile(null);
       }
-      // 3. APÓS A PRIMEIRA VERIFICAÇÃO, DEFINIR 'loading' COMO 'false'
       setLoading(false);
     });
 
     return () => unsubscribe();
   }, []);
 
-  // 4. PASSAR 'user' E 'loading' PARA O CONTEXTO
   return (
-    <AuthContext.Provider value={{ user, loading }}>
+    <AuthContext.Provider value={{ user, userProfile, loading }}>
       {children}
     </AuthContext.Provider>
   );

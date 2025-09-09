@@ -4,17 +4,12 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { getAuth, signInWithEmailAndPassword } from "firebase/auth";
+import { doc, getDoc } from "firebase/firestore"; // Importar funções do Firestore
+import { firestore, app } from "@/lib/firebase"; // Importar firestore e app
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import { app } from "@/lib/firebase";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
 const auth = getAuth(app);
 
@@ -22,20 +17,42 @@ export default function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const router = useRouter();
 
   const handleLogin = async (event: React.FormEvent) => {
-    event.preventDefault(); // Impede o recarregamento da página
+    event.preventDefault();
     setError(null);
+    setIsSubmitting(true);
 
     try {
-      await signInWithEmailAndPassword(auth, email, password);
-      // Sucesso! Redireciona para o dashboard
-      router.push("/escalas"); 
+      
+      // 1. Autenticar o utilizador no Firebase Auth
+      const userCredential = await signInWithEmailAndPassword(auth, email, password);
+      const user = userCredential.user;
+
+      // 2. Após o sucesso, ir buscar o perfil do utilizador no Firestore
+      const userDocRef = doc(firestore, "users", user.uid);
+      const userDoc = await getDoc(userDocRef);
+
+      if (userDoc.exists()) {
+        const userData = userDoc.data();
+        // 3. Verificar o papel do utilizador e redirecionar
+        if (userData.role === 'operator') {
+          router.push("/minha-escala"); // Redirecionar operador para a sua página
+        } else {
+          router.push("/dashboard"); // Redirecionar admin/supervisor para o dashboard
+        }
+      } else {
+        // Se não encontrar um perfil, envia para uma página padrão por segurança
+        setError("Perfil de utilizador não encontrado.");
+        await auth.signOut(); // Desloga o utilizador
+        setIsSubmitting(false);
+      }
     } catch (err) {
-      // Trata erros de login
       setError("E-mail ou senha inválidos. Tente novamente.");
       console.error("Erro de autenticação:", err);
+      setIsSubmitting(false);
     }
   };
 
@@ -87,8 +104,8 @@ export default function LoginPage() {
               </div>
             )}
 
-            <Button type="submit" className="w-full">
-              Entrar
+            <Button type="submit" className="w-full" disabled={isSubmitting}>
+              {isSubmitting ? "A entrar..." : "Entrar"}
             </Button>
           </form>
         </CardContent>
