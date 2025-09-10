@@ -1,9 +1,10 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 // src/app/(dashboard)/usuarios/actions.ts
 "use server";
 
 import { z } from "zod";
 import { revalidatePath } from "next/cache";
-import { adminAuth, adminFirestore } from "@/lib/firebaseAdmin"; // Usar o Admin SDK
+import { adminAuth, adminFirestore } from "@/lib/firebaseAdmin";
 
 const UserSchema = z.object({
     name: z.string().min(3, "O nome é obrigatório."),
@@ -15,33 +16,26 @@ const UserSchema = z.object({
     isActive: z.boolean(),
 });
 
-// A assinatura da função PRECISA ter o 'prevState' para funcionar com useActionState
 export async function createUser(prevState: any, formData: FormData) {
     const isActive = formData.get('isActive') === 'on';
-    
-    // Usamos Object.fromEntries para converter o FormData num objeto
     const validatedFields = UserSchema.safeParse({
         ...Object.fromEntries(formData.entries()),
         isActive,
     });
 
     if (!validatedFields.success) {
-        // Retornar os erros de forma estruturada
         return { success: false, message: "Dados do formulário inválidos.", errors: validatedFields.error.flatten().fieldErrors };
     }
 
     const { email, password, name, role, cpf, telefone } = validatedFields.data;
 
     try {
-        // 1. Criar o utilizador no Firebase Authentication
         const userRecord = await adminAuth.createUser({
             email,
             password,
             displayName: name,
             disabled: !isActive,
         });
-
-        // 2. Criar o perfil do utilizador no Firestore
         await adminFirestore.collection("users").doc(userRecord.uid).set({
             name,
             email,
@@ -61,4 +55,14 @@ export async function createUser(prevState: any, formData: FormData) {
 
     revalidatePath("/usuarios");
     return { success: true, message: "Utilizador criado com sucesso!" };
+}
+export async function deleteUser(userId: string) {
+    try {
+        await adminAuth.deleteUser(userId);
+        await adminFirestore.collection("users").doc(userId).delete();
+        revalidatePath("/usuarios");
+        return { success: true, message: "Usuário excluído com sucesso!" };
+    } catch (error) {
+        return { success: false, message: `Ocorreu um erro no servidor ao excluir o usuário: ${error}` };
+    }
 }
