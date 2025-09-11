@@ -5,8 +5,8 @@ import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { PostoActions } from "./components/PostoActions";
 
-// Interface para os dados do Posto
 interface Posto {
   id: string;
   name: string;
@@ -48,7 +48,7 @@ export default async function PostosPage() {
                 <TableHead>Endereço</TableHead>
                 <TableHead>Categoria</TableHead>
                 <TableHead>Estado</TableHead>
-                <TableHead className="text-right">Ações</TableHead>
+                <TableHead className="text-center">Ações</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -62,11 +62,9 @@ export default async function PostosPage() {
                       {posto.status === 'ativo' ? 'Ativo' : 'Inativo'}
                     </span>
                   </TableCell>
-                  <TableCell className="text-right">
+                  <TableCell className="text-center">
                     <Button asChild variant="outline" size="sm">
-                      <Link href={`/postos/${posto.id}/editar`}>
-                        Editar
-                      </Link>
+                      <PostoActions postoId={posto.id} />
                     </Button>
                   </TableCell>
                 </TableRow>

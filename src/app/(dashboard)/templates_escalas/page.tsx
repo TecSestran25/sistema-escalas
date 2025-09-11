@@ -6,13 +6,12 @@ import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { TemplateActions } from "./components/TemplateActions";
 
-// Interface para os dados do Template de Turno
 interface TurnoTemplate {
   id: string;
   name: string;
   type: 'ciclo' | 'semanal';
-  // A configuração pode variar, então usamos 'any' por enquanto
   config: any; 
 }
 
@@ -29,7 +28,6 @@ async function getTemplates(): Promise<TurnoTemplate[]> {
   return templates;
 }
 
-// Função para descrever a configuração do template de forma legível
 const describeConfig = (template: TurnoTemplate) => {
     if (template.type === 'ciclo' && template.config) {
         return `Ciclo: ${template.config.trabalha} dia(s) de trabalho por ${template.config.folga} dia(s) de folga.`;
@@ -57,7 +55,7 @@ export default async function TemplatesPage() {
                 <TableHead>Nome do Template</TableHead>
                 <TableHead>Tipo</TableHead>
                 <TableHead>Descrição</TableHead>
-                <TableHead className="text-right">Ações</TableHead>
+                <TableHead className="text-center">Ações</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -66,11 +64,9 @@ export default async function TemplatesPage() {
                   <TableCell className="font-medium">{template.name}</TableCell>
                   <TableCell>{template.type.charAt(0).toUpperCase() + template.type.slice(1)}</TableCell>
                   <TableCell>{describeConfig(template)}</TableCell>
-                  <TableCell className="text-right">
-                    <Button asChild variant="outline" size="sm">
-                      <Link href={`/templates_escalas/${template.id}/editar`}>
-                        Editar
-                      </Link>
+                  <TableCell className="text-center">
+                    <Button asChild size="sm">
+                      <TemplateActions templateId={template.id} />
                     </Button>
                   </TableCell>
                 </TableRow>

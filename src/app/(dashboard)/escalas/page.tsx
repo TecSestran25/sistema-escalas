@@ -16,6 +16,7 @@ interface Vigilante {
   name: string;
   matricula: string;
   status: string;
+  telefone?: string; // Adicionado campo telefone
 }
 interface Turno {
     id: string;

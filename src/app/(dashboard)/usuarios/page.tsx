@@ -17,8 +17,8 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { UserActions } from "./components/UserActions";
 
-// Interface atualizada para incluir o campo opcional 'telefone'
 interface User {
   id: string;
   name: string;
@@ -26,7 +26,7 @@ interface User {
   role: 'admin' | 'supervisor' | 'operator';
   cpf: string;
   isActive: boolean;
-  telefone?: string; // Adicionado como opcional
+  telefone?: string;
 }
 
 async function getUsers(): Promise<User[]> {
@@ -63,7 +63,7 @@ export default async function UsuariosPage() {
                     <TableHead>Telefone</TableHead>
                     <TableHead>Estado</TableHead>
                     <TableHead>Perfil</TableHead>
-                    <TableHead className="text-right">Ações</TableHead>
+                    <TableHead className="text-center">Ações</TableHead>
                 </TableRow>
             </TableHeader>
             <TableBody>
@@ -82,12 +82,8 @@ export default async function UsuariosPage() {
                                 {user.role.charAt(0).toUpperCase() + user.role.slice(1)}
                             </span>
                         </TableCell>
-                        <TableCell className="text-right"> {/* NOVA CÉLULA COM O BOTÃO */}
-                            <Button asChild variant="outline" size="sm">
-                                <Link href={`/usuarios/${user.id}/editar`}>
-                                    Editar
-                                </Link>
-                            </Button>
+                        <TableCell className="text-center">
+                            <UserActions userId={user.id} />
                         </TableCell>
                     </TableRow>
                 ))}
