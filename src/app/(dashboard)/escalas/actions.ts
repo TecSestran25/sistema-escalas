@@ -1,23 +1,59 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
+// src/app/(dashboard)/escalas/actions.ts
+// src/app/(dashboard)/escalas/actions.ts
 "use server";
 
 import { firestore } from "@/lib/firebase";
 import { doc, getDoc, collection, writeBatch, Timestamp, updateDoc, query, where, getDocs, addDoc } from "firebase/firestore";
-import { addDays, differenceInDays, startOfDay, endOfDay } from "date-fns";
+import { addDays, differenceInDays, startOfDay, endOfDay, startOfMonth, endOfMonth } from "date-fns";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
+// Interface para a configuração do template de ciclo
 interface CicloConfig {
   trabalha: number;
   folga: number;
 }
+interface Turno {
+    id: string;
+    postoId: string;
+    vigilanteId?: string;
+    startDateTime: string; 
+    endDateTime: string;
+}
 
+
+// Esquema de validação para os dados do formulário de geração
 const GerarTurnosSchema = z.object({
     postoId: z.string().min(1, "É necessário selecionar um posto."),
     templateId: z.string().min(1, "É necessário selecionar um template."),
-    dataInicio: z.string().min(10, "Data de início inválida"),
+    dataInicio: z.string().min(10, "Data de início inválida"), // Ex: "2025-08-31"
     dataFim: z.string().min(10, "Data de fim inválida"),
 });
+
+export async function getTurnosByMonth(date: Date): Promise<Turno[]> {
+    const start = startOfMonth(date);
+    const end = endOfMonth(date);
+
+    const turnosCollection = collection(firestore, "turnos");
+    const q = query(turnosCollection,
+        where('startDateTime', '>=', Timestamp.fromDate(start)),
+        where('startDateTime', '<=', Timestamp.fromDate(end))
+    );
+    const querySnapshot = await getDocs(q);
+    
+    return querySnapshot.docs.map(doc => {
+        const data = doc.data();
+        return {
+            id: doc.id,
+            postoId: data.postoId,
+            vigilanteId: data.vigilanteId,
+            startDateTime: data.startDateTime.toDate().toISOString(),
+            endDateTime: data.endDateTime.toDate().toISOString(),
+        };
+    });
+}
+
 
 async function isVigilanteOcupado(vigilanteId: string, data: Date): Promise<boolean> {
     const inicioDoDia = startOfDay(data);
@@ -75,9 +111,10 @@ export async function preencherEscalaAutomaticamente(prevState: any, formData: F
             const contadorCiclo = i % cicloTotal;
 
             if (contadorCiclo < config.trabalha) {
+                // VERIFICAÇÃO DE CONFLITO ANTES DE CRIAR O TURNO
                 if (await isVigilanteOcupado(vigilanteId, diaAtual)) {
                     conflitosEncontrados++;
-                    continue;
+                    continue; // Pula este dia, pois o vigilante já está ocupado
                 }
 
                 const turnoRef = doc(turnosCollection);

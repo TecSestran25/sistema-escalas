@@ -93,7 +93,7 @@ export default function NovoTemplatePage() {
                     </CardContent>
                     <CardFooter className="flex justify-end gap-4">
                         <Button variant="outline" asChild>
-                            <Link href="/templates">Cancelar</Link>
+                            <Link href="/templates_escalas">Cancelar</Link>
                         </Button>
                         <Button type="submit" disabled={isSubmitting}>
                             {isSubmitting ? "A Guardar..." : "Guardar Template"}

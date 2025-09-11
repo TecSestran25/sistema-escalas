@@ -3,8 +3,8 @@
 // src/app/(dashboard)/escalas/components/EscalaGrid.tsx
 "use client";
 
-import React, { useState, useMemo } from "react"
-import { format, startOfMonth, startOfWeek, endOfMonth, eachDayOfInterval, addDays, subDays, isSameDay, isWithinInterval, endOfDay, getDay } from "date-fns";
+import React, { useState, useMemo, useEffect } from "react";
+import { format, startOfMonth, startOfWeek, endOfMonth, eachDayOfInterval, addDays, subDays, isSameDay, isWithinInterval, endOfDay, isSameMonth, endOfWeek } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { DndContext, DragEndEvent, DragStartEvent, DragOverlay } from "@dnd-kit/core";
 import jsPDF from "jspdf";
@@ -17,7 +17,7 @@ import { GerarTurnosDialog } from "./GerarTurnosDialog";
 import { VigilanteCard } from "./VigilanteCard";
 import { TurnoCard } from "./TurnoCard";
 import { GridCell } from "./GridCell";
-import { alocarVigilante, criarEAlocarTurno, desalocarVigilante } from "../actions";
+import { alocarVigilante, criarEAlocarTurno, desalocarVigilante, getTurnosByMonth } from "../actions";
 import { PreenchimentoAutomaticoDialog } from "./PreenchimentoAutomaticoDialog";
 import { SolicitarTrocaDialog } from "./SolicitarTrocaDialog";
 
@@ -39,8 +39,8 @@ interface EscalaGridProps {
     ausenciasIniciais: Ausencia[];
 }
 
-const POSTOS_POR_PAGINA = 15;
-const VIGILANTES_POR_PAGINA = 15;
+const POSTOS_POR_PAGINA = 3;
+const VIGILANTES_POR_PAGINA = 8;
 
 export function EscalaGrid({ postos, vigilantesIniciais, turnosIniciais, templates, ausenciasIniciais }: EscalaGridProps) {
     const [currentDate, setCurrentDate] = useState(new Date());
@@ -57,13 +57,32 @@ export function EscalaGrid({ postos, vigilantesIniciais, turnosIniciais, templat
     const [isSidebarOpen, setIsSidebarOpen] = useState(true);
     const [paginaAtualVigilantes, setPaginaAtualVigilantes] = useState(1);
     const [filtroVigilante, setFiltroVigilante] = useState("");
-
-    const startOfTheWeek = startOfWeek(currentDate, { locale: ptBR });
-    const daysOfWeek = Array.from({ length: 7 }).map((_, i) => addDays(startOfTheWeek, i));
     const startOfTheMonth = startOfMonth(currentDate);
     const endOfTheMonth = endOfMonth(currentDate);
     const daysOfMonth = eachDayOfInterval({ start: startOfTheMonth, end: endOfTheMonth });
 
+    const startOfTheWeek = startOfWeek(currentDate, { locale: ptBR });
+    const daysOfWeek = Array.from({ length: 7 }).map((_, i) => addDays(startOfTheWeek, i));
+
+    useEffect(() => {
+        const fetchTurnosForWeek = async () => {
+            const start = startOfWeek(currentDate, { locale: ptBR });
+            const end = endOfWeek(currentDate, { locale: ptBR });
+
+            const turnosInicio = await getTurnosByMonth(start);
+
+            if (!isSameMonth(start, end)) {
+                const turnosFim = await getTurnosByMonth(end);
+                const combinedTurnos = [...turnosInicio, ...turnosFim];
+                const uniqueTurnos = Array.from(new Map(combinedTurnos.map(turno => [turno.id, turno])).values());
+                setTurnos(uniqueTurnos);
+            } else {
+                setTurnos(turnosInicio);
+            }
+        };
+
+        fetchTurnosForWeek();
+    }, [currentDate]);
 
     const handleExportPDF = () => {
         const doc = new jsPDF({ orientation: 'landscape' });
@@ -122,19 +141,34 @@ export function EscalaGrid({ postos, vigilantesIniciais, turnosIniciais, templat
 
             return postoRows;
         });
+        
+        if (tableBody.length === 0) {
+            doc.text("Nenhuma escala alocada para este mês.", 14, 25);
+        }else {
+            autoTable(doc, {
+                head: [tableHeaders],
+                body: tableBody,
+                startY: 20,
+                theme: 'grid',
+                styles: { valign: 'middle', cellPadding: 2, fontSize: 8},
+                headStyles: { fillColor: [41, 128, 185], textColor: 255 },
+                didParseCell: function (data) {
+                    if (data.cell.raw) {
+                       data.cell.styles.valign = 'middle';
+                       data.cell.styles.halign = 'center';
+                    }
+                },
+                columnStyles: {
+                0: { cellWidth: 18 },
+                1: { cellWidth: 20 },
+                2: { cellWidth: 25 },
+                3: { cellWidth: 20 },
+                4: { cellWidth: 20 },
+                
+            },
+            });
 
-        autoTable(doc, {
-            head: [tableHeaders],
-            body: tableBody,
-            startY: 20,
-            theme: 'grid',
-            headStyles: { fontSize: 8, fillColor: [22, 160, 133] },
-            styles: { fontSize: 8 },
-            columnStyles: {
-                0: { cellWidth: 30 },
-                2: { cellWidth: 40 },
-            }
-        });
+        }
 
         doc.save(`escala_${format(currentDate, "yyyy-MM")}.pdf`);
     };
@@ -155,46 +189,34 @@ export function EscalaGrid({ postos, vigilantesIniciais, turnosIniciais, templat
     async function handleDragEnd(event: DragEndEvent) {
         setActiveVigilante(null);
         const { active, over } = event;
-
         if (!over) return;
-
         const vigilanteId = active.id as string;
         const targetId = over.id as string;
-        
         const dataDoTurnoAlvo = over.data.current?.turno 
             ? new Date((over.data.current.turno as Turno).startDateTime)
             : over.data.current?.day as Date;
-
-        if (!dataDoTurnoAlvo) return; // Segurança extra
-
+        if (!dataDoTurnoAlvo) return;
         const isAlreadyScheduled = turnos.some(
             t => t.vigilanteId === vigilanteId && isSameDay(new Date(t.startDateTime), dataDoTurnoAlvo)
         );
-
         if (isAlreadyScheduled) {
             alert("Este vigilante já possui um turno neste dia.");
             return;
         }
-
         if (targetId.startsWith("turno-")) {
             const turnoId = targetId.replace("turno-", "");
             const estadoOriginalDosTurnos = turnos;
-
             setTurnos(prev => prev.map(t => t.id === turnoId ? { ...t, vigilanteId } : t));
-            
             const result = await alocarVigilante(turnoId, vigilanteId, dataDoTurnoAlvo);
             if (!result.success) {
                 alert(result.message);
                 setTurnos(estadoOriginalDosTurnos);
             }
-        }
-        else if (targetId.startsWith("cell-")) {
+        } else if (targetId.startsWith("cell-")) {
             const { postoId, day } = over.data.current as { postoId: string, day: Date };
-            
             const tempId = `temp-${Date.now()}`;
             const inicioTurno = new Date(day); inicioTurno.setHours(6, 0, 0, 0);
             const fimTurno = new Date(day); fimTurno.setHours(18, 0, 0, 0);
-
             const newTurno: Turno = {
                 id: tempId,
                 postoId: postoId,
@@ -202,11 +224,8 @@ export function EscalaGrid({ postos, vigilantesIniciais, turnosIniciais, templat
                 startDateTime: inicioTurno.toISOString(),
                 endDateTime: fimTurno.toISOString(),
             };
-            
             setTurnos(prev => [...prev, newTurno]);
-
             const result = await criarEAlocarTurno(postoId, vigilanteId, day);
-            
             if (result.success && result.newTurnoId) {
                 setTurnos(prev => 
                     prev.map(t => (t.id === tempId ? { ...t, id: result.newTurnoId! } : t))
@@ -220,14 +239,8 @@ export function EscalaGrid({ postos, vigilantesIniciais, turnosIniciais, templat
 
     async function handleDesalocar(turnoId: string) {
         const estadoOriginalDosTurnos = turnos;
-        const turnoParaDesalocar = estadoOriginalDosTurnos.find(t => t.id === turnoId);
-
-        if (!turnoParaDesalocar) return;
-
         setTurnos(prev => prev.map(t => t.id === turnoId ? { ...t, vigilanteId: undefined, status: "vago" } : t));
-
         const result = await desalocarVigilante(turnoId);
-
         if (!result.success) {
             alert(result.message);
             setTurnos(estadoOriginalDosTurnos);
@@ -263,9 +276,7 @@ export function EscalaGrid({ postos, vigilantesIniciais, turnosIniciais, templat
         const grouped: { [key: string]: Turno[] } = {};
         turnos.forEach(turno => {
             const dateStr = format(new Date(turno.startDateTime), 'yyyy-MM-dd');
-            if (!grouped[dateStr]) {
-                grouped[dateStr] = [];
-            }
+            if (!grouped[dateStr]) grouped[dateStr] = [];
             grouped[dateStr].push(turno);
         });
         return grouped;
@@ -296,7 +307,7 @@ export function EscalaGrid({ postos, vigilantesIniciais, turnosIniciais, templat
                             Escala da Semana - {format(startOfTheWeek, "dd 'de' MMM", { locale: ptBR })}
                         </h1>
                         <div className="flex items-center gap-2 flex-wrap">
-                            <Button onClick={handleExportPDF}><FileDown className="h-4 w-4 mr-2" /> Exportar PDF</Button>
+                            <Button onClick={handleExportPDF}><FileDown className="h-4 w-4 mr-2" /> Exportar PDF Mensal</Button>
                             <Button onClick={() => setIsDialogOpen(true)}>Gerar Turnos</Button>
                             <Button onClick={() => setIsPreenchimentoOpen(true)}>Preenchimento Automático</Button>
                             <Button variant="outline" size="icon" onClick={goToPreviousWeek}><ChevronLeft className="h-4 w-4" /></Button>
@@ -312,13 +323,13 @@ export function EscalaGrid({ postos, vigilantesIniciais, turnosIniciais, templat
                         />
                     </div>
 
-                    <div className="grid grid-cols-[200px_repeat(7,1fr)] gap-1 flex-1">
-                        <div className="font-bold bg-muted p-2 rounded-tl-lg">Posto</div>
-                        {daysOfWeek.map((day) => (<div key={day.toString()} className="font-bold bg-muted p-2 text-center"><p>{format(day, "eee", { locale: ptBR })}</p><p className="text-sm font-normal">{format(day, "dd/MM")}</p></div>))}
+                    <div className="grid grid-cols-[200px_repeat(7,1fr)] gap-1 flex-1 overflow-auto">
+                        <div className="font-bold bg-muted p-2 sticky top-0 z-10">Posto</div>
+                        {daysOfWeek.map((day) => (<div key={day.toISOString()} className="font-bold bg-muted p-2 text-center sticky top-0 z-10"><p className="text-xs">{format(day, "eee", { locale: ptBR })}</p><p>{format(day, "d")}</p></div>))}
                         
                         {postosPaginados.map((posto) => (
                             <React.Fragment key={posto.id}>
-                                <div className="font-semibold bg-muted p-2 flex items-center">{posto.name}</div>
+                                <div className="font-semibold bg-muted p-2 flex items-center sticky left-0 z-10">{posto.name}</div>
                                 {daysOfWeek.map((day) => {
                                     const dayStr = format(day, 'yyyy-MM-dd');
                                     const turnosDoDia = turnosPorDia[dayStr] || [];
