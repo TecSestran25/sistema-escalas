@@ -8,11 +8,14 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { TemplateActions } from "./components/TemplateActions";
 
+// Interface atualizada para o template
 interface TurnoTemplate {
   id: string;
   name: string;
-  type: 'ciclo' | 'semanal';
-  config: any; 
+  type: 'ciclo' | 'fixo';
+  horarioInicio: string;
+  horarioFim: string;
+  config: any;
 }
 
 async function getTemplates(): Promise<TurnoTemplate[]> {
@@ -28,12 +31,20 @@ async function getTemplates(): Promise<TurnoTemplate[]> {
   return templates;
 }
 
+// Função de descrição atualizada para lidar com ambos os tipos e horários
 const describeConfig = (template: TurnoTemplate) => {
+    const horario = `(${template.horarioInicio || 'N/A'} - ${template.horarioFim || 'N/A'})`;
+
     if (template.type === 'ciclo' && template.config) {
-        return `Ciclo: ${template.config.trabalha} dia(s) de trabalho por ${template.config.folga} dia(s) de folga.`;
+        return `Ciclo: ${template.config.trabalha} x ${template.config.folga} ${horario}`;
     }
-    // Futuramente, podemos adicionar a descrição para outros tipos de template
-    return "Configuração não especificada.";
+
+    if (template.type === 'fixo' && template.config?.dias) {
+        const diasStr = template.config.dias.join(', ').toUpperCase();
+        return `Fixo: ${diasStr} ${horario}`;
+    }
+
+    return `Configuração não especificada ${horario}`;
 }
 
 export default async function TemplatesPage() {
@@ -62,12 +73,10 @@ export default async function TemplatesPage() {
               {templates.map((template) => (
                 <TableRow key={template.id}>
                   <TableCell className="font-medium">{template.name}</TableCell>
-                  <TableCell>{template.type.charAt(0).toUpperCase() + template.type.slice(1)}</TableCell>
+                  <TableCell>{template.type === 'ciclo' ? 'Ciclo' : 'Fixo'}</TableCell>
                   <TableCell>{describeConfig(template)}</TableCell>
                   <TableCell className="text-center">
-                    <Button asChild size="sm">
-                      <TemplateActions templateId={template.id} />
-                    </Button>
+                    <TemplateActions templateId={template.id} />
                   </TableCell>
                 </TableRow>
               ))}
