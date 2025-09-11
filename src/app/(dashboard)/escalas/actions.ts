@@ -8,7 +8,7 @@ import { addDays, differenceInDays, startOfDay, endOfDay, startOfMonth, endOfMon
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
-// --- INTERFACES ATUALIZADAS E NOVAS ---
+// --- INTERFACES E TIPOS ---
 interface CicloConfig {
   trabalha: number;
   folga: number;
@@ -26,9 +26,21 @@ interface Turno {
     id: string;
     postoId: string;
     vigilanteId?: string;
-    startDateTime: string;
+    startDateTime: string; 
     endDateTime: string;
 }
+
+// NOVO: Adicionado o tipo State que o formulário precisa
+export type State = {
+    errors?: {
+        title?: string[];
+        userId?: string[];
+        startDateTime?: string[];
+        endDateTime?: string[];
+    };
+    message?: string | null;
+};
+
 
 // Mapeamento de dias da semana para o formato getDay() (Dom=0, Seg=1...)
 const diaMap: { [key: string]: number } = {
@@ -48,6 +60,59 @@ async function isVigilanteOcupado(vigilanteId: string, data: Date): Promise<bool
     );
     const querySnapshot = await getDocs(q);
     return !querySnapshot.empty;
+}
+
+const criarDatasTurno = (dia: Date, horarioInicio: string, horarioFim: string): { inicio: Date, fim: Date } => {
+    const [startHour, startMinute] = horarioInicio.split(':').map(Number);
+    const [endHour, endMinute] = horarioFim.split(':').map(Number);
+    const inicio = new Date(dia);
+    inicio.setHours(startHour, startMinute, 0, 0);
+    const fim = new Date(dia);
+    if (endHour < startHour || (endHour === startHour && endMinute < startMinute)) {
+        fim.setDate(fim.getDate() + 1);
+    }
+    fim.setHours(endHour, endMinute, 0, 0);
+    return { inicio, fim };
+};
+
+// --- SERVER ACTIONS ---
+
+// NOVO: A função createShift que estava faltando
+export async function createShift(prevState: State, formData: FormData): Promise<State> {
+    const ShiftSchema = z.object({
+        title: z.string().min(1, "O título é obrigatório."),
+        userId: z.string().min(1, "É necessário atribuir a um usuário."),
+        startDateTime: z.string().min(1, "A data de início é obrigatória."),
+        endDateTime: z.string().min(1, "A data de fim é obrigatória."),
+    });
+
+    const validatedFields = ShiftSchema.safeParse(Object.fromEntries(formData.entries()));
+
+    if (!validatedFields.success) {
+        return {
+            errors: validatedFields.error.flatten().fieldErrors,
+            message: "Erro de validação. Por favor, verifique os campos.",
+        };
+    }
+
+    const { title, userId, startDateTime, endDateTime } = validatedFields.data;
+
+    try {
+        await addDoc(collection(firestore, "escalas"), {
+            title,
+            userId,
+            startDateTime: Timestamp.fromDate(new Date(startDateTime)),
+            endDateTime: Timestamp.fromDate(new Date(endDateTime)),
+        });
+    } catch (e) {
+        return { 
+            message: `Erro ao salvar a escala no banco de dados. \n${e}`
+         };
+    }
+
+    revalidatePath("/escalas");
+    // Em vez de redirect, retornamos uma mensagem de sucesso ou um estado limpo
+    return { message: "Escala criada com sucesso!" };
 }
 
 export async function getTurnosByMonth(date: Date): Promise<Turno[]> {
@@ -70,27 +135,6 @@ export async function getTurnosByMonth(date: Date): Promise<Turno[]> {
         };
     });
 }
-
-// Helper para criar as datas de início e fim do turno
-const criarDatasTurno = (dia: Date, horarioInicio: string, horarioFim: string): { inicio: Date, fim: Date } => {
-    const [startHour, startMinute] = horarioInicio.split(':').map(Number);
-    const [endHour, endMinute] = horarioFim.split(':').map(Number);
-
-    const inicio = new Date(dia);
-    inicio.setHours(startHour, startMinute, 0, 0);
-
-    const fim = new Date(dia);
-    // Se o turno termina no dia seguinte
-    if (endHour < startHour || (endHour === startHour && endMinute < startMinute)) {
-        fim.setDate(fim.getDate() + 1);
-    }
-    fim.setHours(endHour, endMinute, 0, 0);
-
-    return { inicio, fim };
-};
-
-
-// --- SERVER ACTIONS ---
 
 export async function gerarTurnos(prevState: any, formData: FormData) {
     const GerarTurnosSchema = z.object({
@@ -165,7 +209,6 @@ export async function gerarTurnos(prevState: any, formData: FormData) {
     return { success: true, message: "Turnos gerados com sucesso!" };
 }
 
-
 export async function preencherEscalaAutomaticamente(prevState: any, formData: FormData) {
     const schema = z.object({
         vigilanteId: z.string().min(1, "Selecione um vigilante."),
@@ -238,7 +281,6 @@ export async function preencherEscalaAutomaticamente(prevState: any, formData: F
     }
 }
 
-
 export async function alocarVigilante(turnoId: string, vigilanteId: string, dataDoTurno: Date) {
     try {
         if (await isVigilanteOcupado(vigilanteId, dataDoTurno)) {
@@ -280,10 +322,7 @@ export async function criarEAlocarTurno(
         }
 
         const turnosCollection = collection(firestore, "turnos");
-        // Usando um horário padrão para turnos criados via arrastar e soltar.
-        // O ideal seria buscar o horário do template, mas isso adicionaria complexidade
-        // a uma ação que precisa ser rápida. Um horário "padrão" é uma boa solução.
-        const { inicio, fim } = criarDatasTurno(dataDoTurno, "07:00", "19:00");
+        const { inicio, fim } = criarDatasTurno(dataDoTurno, "07:00", "19:00"); // Horário Padrão
 
         const docRef = await addDoc(turnosCollection, {
             postoId,
