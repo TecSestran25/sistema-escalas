@@ -1,14 +1,18 @@
 /* eslint-disable @typescript-eslint/no-unused-vars */
+/* eslint-disable @typescript-eslint/no-explicit-any */
+// src/app/(dashboard)/escalas/components/EscalaGrid.tsx
 "use client";
 
-import React, { useState, useMemo } from "react";
-import { format, startOfWeek, addDays, subDays, isSameDay, isWithinInterval, endOfDay } from "date-fns";
+import React, { useState, useMemo } from "react"
+import { format, startOfMonth, startOfWeek, endOfMonth, eachDayOfInterval, addDays, subDays, isSameDay, isWithinInterval, endOfDay, getDay } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { DndContext, DragEndEvent, DragStartEvent, DragOverlay } from "@dnd-kit/core";
+import jsPDF from "jspdf";
+import autoTable from "jspdf-autotable";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { ChevronLeft, ChevronRight, AlertTriangle, ChevronsRight, ChevronsLeft } from "lucide-react";
+import { ChevronLeft, ChevronRight, AlertTriangle, ChevronsRight, ChevronsLeft, FileDown } from "lucide-react";
 import { GerarTurnosDialog } from "./GerarTurnosDialog";
 import { VigilanteCard } from "./VigilanteCard";
 import { TurnoCard } from "./TurnoCard";
@@ -17,8 +21,9 @@ import { alocarVigilante, criarEAlocarTurno, desalocarVigilante } from "../actio
 import { PreenchimentoAutomaticoDialog } from "./PreenchimentoAutomaticoDialog";
 import { SolicitarTrocaDialog } from "./SolicitarTrocaDialog";
 
+// ... (Interfaces)
 interface Posto { id: string; name: string;  dotação: number;}
-interface Vigilante { id:string; name: string; matricula: string; }
+interface Vigilante { id:string; name: string; matricula: string; telefone?: string; }
 interface Turno { id: string; postoId: string; vigilanteId?: string; startDateTime: string; endDateTime: string; }
 interface Template { id: string; name: string; }
 interface Ausencia {
@@ -34,8 +39,8 @@ interface EscalaGridProps {
     ausenciasIniciais: Ausencia[];
 }
 
-const POSTOS_POR_PAGINA = 5;
-const VIGILANTES_POR_PAGINA = 12;
+const POSTOS_POR_PAGINA = 15;
+const VIGILANTES_POR_PAGINA = 15;
 
 export function EscalaGrid({ postos, vigilantesIniciais, turnosIniciais, templates, ausenciasIniciais }: EscalaGridProps) {
     const [currentDate, setCurrentDate] = useState(new Date());
@@ -53,13 +58,91 @@ export function EscalaGrid({ postos, vigilantesIniciais, turnosIniciais, templat
     const [paginaAtualVigilantes, setPaginaAtualVigilantes] = useState(1);
     const [filtroVigilante, setFiltroVigilante] = useState("");
 
+    const startOfTheWeek = startOfWeek(currentDate, { locale: ptBR });
+    const daysOfWeek = Array.from({ length: 7 }).map((_, i) => addDays(startOfTheWeek, i));
+    const startOfTheMonth = startOfMonth(currentDate);
+    const endOfTheMonth = endOfMonth(currentDate);
+    const daysOfMonth = eachDayOfInterval({ start: startOfTheMonth, end: endOfTheMonth });
+
+
+    const handleExportPDF = () => {
+        const doc = new jsPDF({ orientation: 'landscape' });
+        const monthTitle = `Escala Mensal - ${format(currentDate, "MMMM 'de' yyyy", { locale: ptBR })}`;
+        doc.text(monthTitle, 14, 15);
+
+        const diasDoMesHeaders = daysOfMonth.map(day => format(day, 'd'));
+        const tableHeaders = ['SETOR', 'MATRICULA', 'NOME', 'HORÁRIO', 'FONE', ...diasDoMesHeaders];
+        
+        const tableBody = postos.flatMap(posto => {
+            const turnosDoPosto = turnos.filter(t => t.postoId === posto.id && t.vigilanteId);
+            
+            const vigilantesDoPosto = turnosDoPosto.reduce((acc, turno) => {
+                const vigilante = vigilantes.find(v => v.id === turno.vigilanteId);
+                if (!vigilante) return acc;
+
+                const horario = `${format(new Date(turno.startDateTime), "HH:mm")}-${format(new Date(turno.endDateTime), "HH:mm")}`;
+                const key = `${vigilante.id}-${horario}`;
+
+                if (!acc[key]) {
+                    acc[key] = {
+                        ...vigilante,
+                        horario,
+                        dias: new Array(daysOfMonth.length).fill('')
+                    };
+                }
+                
+                const diaIndex = new Date(turno.startDateTime).getDate() - 1;
+                acc[key].dias[diaIndex] = 'X';
+
+                return acc;
+            }, {} as any);
+
+            const postoRows: any[] = [];
+            
+            Object.values(vigilantesDoPosto).forEach((vigilante: any, index) => {
+                postoRows.push([
+                    index === 0 ? posto.name : '',
+                    vigilante.matricula,
+                    vigilante.name,
+                    vigilante.horario,
+                    vigilante.telefone || 'N/A',
+                    ...vigilante.dias
+                ]);
+            });
+
+            const vagasOcupadas = Object.keys(vigilantesDoPosto).length;
+            const vagasRestantes = posto.dotação - vagasOcupadas;
+
+            for (let i = 0; i < vagasRestantes; i++) {
+                postoRows.push([
+                    i === 0 && vagasOcupadas === 0 ? posto.name : '',
+                    'VAGO', '', '', '', ...new Array(daysOfMonth.length).fill('')
+                ]);
+            }
+
+            return postoRows;
+        });
+
+        autoTable(doc, {
+            head: [tableHeaders],
+            body: tableBody,
+            startY: 20,
+            theme: 'grid',
+            headStyles: { fontSize: 8, fillColor: [22, 160, 133] },
+            styles: { fontSize: 8 },
+            columnStyles: {
+                0: { cellWidth: 30 },
+                2: { cellWidth: 40 },
+            }
+        });
+
+        doc.save(`escala_${format(currentDate, "yyyy-MM")}.pdf`);
+    };
+
     const handleSolicitarTrocaClick = (turno: Turno) => {
         setTurnoParaTroca(turno);
         setIsTrocaDialogOpen(true);
     };
-
-    const startOfTheWeek = startOfWeek(currentDate, { locale: ptBR });
-    const daysOfWeek = Array.from({ length: 7 }).map((_, i) => addDays(startOfTheWeek, i));
 
     const goToPreviousWeek = () => setCurrentDate(subDays(currentDate, 7));
     const goToNextWeek = () => setCurrentDate(addDays(currentDate, 7));
@@ -212,7 +295,8 @@ export function EscalaGrid({ postos, vigilantesIniciais, turnosIniciais, templat
                         <h1 className="text-xl font-semibold">
                             Escala da Semana - {format(startOfTheWeek, "dd 'de' MMM", { locale: ptBR })}
                         </h1>
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2 flex-wrap">
+                            <Button onClick={handleExportPDF}><FileDown className="h-4 w-4 mr-2" /> Exportar PDF</Button>
                             <Button onClick={() => setIsDialogOpen(true)}>Gerar Turnos</Button>
                             <Button onClick={() => setIsPreenchimentoOpen(true)}>Preenchimento Automático</Button>
                             <Button variant="outline" size="icon" onClick={goToPreviousWeek}><ChevronLeft className="h-4 w-4" /></Button>
@@ -239,7 +323,6 @@ export function EscalaGrid({ postos, vigilantesIniciais, turnosIniciais, templat
                                     const dayStr = format(day, 'yyyy-MM-dd');
                                     const turnosDoDia = turnosPorDia[dayStr] || [];
                                     const turnosNestePosto = turnosDoDia.filter(t => t.postoId === posto.id);
-
                                     const pessoalAlocado = turnosNestePosto.filter(t => t.vigilanteId).length;
                                     const necessitaPessoal = pessoalAlocado < posto.dotação;
 
