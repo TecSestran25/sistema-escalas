@@ -1,13 +1,15 @@
 // src/app/(dashboard)/postos/[id]/editar/page.tsx
 import { doc, getDoc } from "firebase/firestore";
 import { firestore } from "@/lib/firebase";
-import EditPostoForm from "./EditPostoForm"; // O formulário de cliente
+import EditPostoForm from "./EditPostoForm";
 
+// Interface corrigida com o campo "dotação"
 interface Posto {
     id: string;
     name: string;
     endereco: string;
     categoria: string;
+    dotação: number; // <-- CAMPO ADICIONADO AQUI
     observacoes?: string;
     status: 'ativo' | 'inativo';
 }
@@ -15,6 +17,7 @@ interface Posto {
 async function getPosto(id: string): Promise<Posto | null> {
     const docRef = doc(firestore, "postos", id);
     const docSnap = await getDoc(docRef);
+    // O cast para "as Posto" agora será correto
     return docSnap.exists() ? ({ id: docSnap.id, ...docSnap.data() } as Posto) : null;
 }
 

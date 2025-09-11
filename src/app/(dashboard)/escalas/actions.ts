@@ -1,6 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 // src/app/(dashboard)/escalas/actions.ts
-// src/app/(dashboard)/escalas/actions.ts
 "use server";
 
 import { firestore } from "@/lib/firebase";
@@ -9,10 +8,19 @@ import { addDays, differenceInDays, startOfDay, endOfDay, startOfMonth, endOfMon
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
-// Interface para a configuração do template de ciclo
+// --- INTERFACES E TIPOS ---
 interface CicloConfig {
   trabalha: number;
   folga: number;
+}
+interface FixoConfig {
+    dias: ('seg' | 'ter' | 'qua' | 'qui' | 'sex' | 'sab' | 'dom')[];
+}
+interface TurnoTemplate {
+    type: 'ciclo' | 'fixo';
+    horarioInicio: string; // "HH:mm"
+    horarioFim: string;   // "HH:mm"
+    config: CicloConfig | FixoConfig;
 }
 interface Turno {
     id: string;
@@ -22,26 +30,100 @@ interface Turno {
     endDateTime: string;
 }
 
+// NOVO: Adicionado o tipo State que o formulário precisa
+export type State = {
+    errors?: {
+        title?: string[];
+        userId?: string[];
+        startDateTime?: string[];
+        endDateTime?: string[];
+    };
+    message?: string | null;
+};
 
-// Esquema de validação para os dados do formulário de geração
-const GerarTurnosSchema = z.object({
-    postoId: z.string().min(1, "É necessário selecionar um posto."),
-    templateId: z.string().min(1, "É necessário selecionar um template."),
-    dataInicio: z.string().min(10, "Data de início inválida"), // Ex: "2025-08-31"
-    dataFim: z.string().min(10, "Data de fim inválida"),
-});
+
+// Mapeamento de dias da semana para o formato getDay() (Dom=0, Seg=1...)
+const diaMap: { [key: string]: number } = {
+    dom: 0, seg: 1, ter: 2, qua: 3, qui: 4, sex: 5, sab: 6
+};
+
+// --- FUNÇÕES DE LÓGICA ---
+
+async function isVigilanteOcupado(vigilanteId: string, data: Date): Promise<boolean> {
+    const inicioDoDia = startOfDay(data);
+    const fimDoDia = endOfDay(data);
+    const turnosCollection = collection(firestore, "turnos");
+    const q = query(turnosCollection,
+        where("vigilanteId", "==", vigilanteId),
+        where("startDateTime", ">=", Timestamp.fromDate(inicioDoDia)),
+        where("startDateTime", "<=", Timestamp.fromDate(fimDoDia))
+    );
+    const querySnapshot = await getDocs(q);
+    return !querySnapshot.empty;
+}
+
+const criarDatasTurno = (dia: Date, horarioInicio: string, horarioFim: string): { inicio: Date, fim: Date } => {
+    const [startHour, startMinute] = horarioInicio.split(':').map(Number);
+    const [endHour, endMinute] = horarioFim.split(':').map(Number);
+    const inicio = new Date(dia);
+    inicio.setHours(startHour, startMinute, 0, 0);
+    const fim = new Date(dia);
+    if (endHour < startHour || (endHour === startHour && endMinute < startMinute)) {
+        fim.setDate(fim.getDate() + 1);
+    }
+    fim.setHours(endHour, endMinute, 0, 0);
+    return { inicio, fim };
+};
+
+// --- SERVER ACTIONS ---
+
+// NOVO: A função createShift que estava faltando
+export async function createShift(prevState: State, formData: FormData): Promise<State> {
+    const ShiftSchema = z.object({
+        title: z.string().min(1, "O título é obrigatório."),
+        userId: z.string().min(1, "É necessário atribuir a um usuário."),
+        startDateTime: z.string().min(1, "A data de início é obrigatória."),
+        endDateTime: z.string().min(1, "A data de fim é obrigatória."),
+    });
+
+    const validatedFields = ShiftSchema.safeParse(Object.fromEntries(formData.entries()));
+
+    if (!validatedFields.success) {
+        return {
+            errors: validatedFields.error.flatten().fieldErrors,
+            message: "Erro de validação. Por favor, verifique os campos.",
+        };
+    }
+
+    const { title, userId, startDateTime, endDateTime } = validatedFields.data;
+
+    try {
+        await addDoc(collection(firestore, "escalas"), {
+            title,
+            userId,
+            startDateTime: Timestamp.fromDate(new Date(startDateTime)),
+            endDateTime: Timestamp.fromDate(new Date(endDateTime)),
+        });
+    } catch (e) {
+        return { 
+            message: `Erro ao salvar a escala no banco de dados. \n${e}`
+         };
+    }
+
+    revalidatePath("/escalas");
+    // Em vez de redirect, retornamos uma mensagem de sucesso ou um estado limpo
+    return { message: "Escala criada com sucesso!" };
+}
 
 export async function getTurnosByMonth(date: Date): Promise<Turno[]> {
     const start = startOfMonth(date);
     const end = endOfMonth(date);
-
     const turnosCollection = collection(firestore, "turnos");
     const q = query(turnosCollection,
         where('startDateTime', '>=', Timestamp.fromDate(start)),
         where('startDateTime', '<=', Timestamp.fromDate(end))
     );
     const querySnapshot = await getDocs(q);
-    
     return querySnapshot.docs.map(doc => {
         const data = doc.data();
         return {
@@ -54,20 +136,77 @@ export async function getTurnosByMonth(date: Date): Promise<Turno[]> {
     });
 }
 
+export async function gerarTurnos(prevState: any, formData: FormData) {
+    const GerarTurnosSchema = z.object({
+        postoId: z.string().min(1, "É necessário selecionar um posto."),
+        templateId: z.string().min(1, "É necessário selecionar um template."),
+        dataInicio: z.string().min(10, "Data de início inválida"),
+        dataFim: z.string().min(10, "Data de fim inválida"),
+    });
 
-async function isVigilanteOcupado(vigilanteId: string, data: Date): Promise<boolean> {
-    const inicioDoDia = startOfDay(data);
-    const fimDoDia = endOfDay(data);
-    const turnosCollection = collection(firestore, "turnos");
+    const validatedFields = GerarTurnosSchema.safeParse(Object.fromEntries(formData.entries()));
+    if (!validatedFields.success) {
+        return { message: "Dados inválidos." };
+    }
+    
+    const { postoId, templateId, dataInicio: dataInicioStr, dataFim: dataFimStr } = validatedFields.data;
+    const dataInicio = new Date(`${dataInicioStr}T00:00:00`);
+    const dataFim = new Date(`${dataFimStr}T00:00:00`);
 
-    const q = query(turnosCollection,
-        where("vigilanteId", "==", vigilanteId),
-        where("startDateTime", ">=", Timestamp.fromDate(inicioDoDia)),
-        where("startDateTime", "<=", Timestamp.fromDate(fimDoDia))
-    );
+    if (dataInicio > dataFim) {
+        return { message: "A data de início não pode ser posterior à data de fim." };
+    }
+    
+    try {
+        const templateRef = doc(firestore, "turnoTemplates", templateId);
+        const templateSnap = await getDoc(templateRef);
+        if (!templateSnap.exists()) {
+            return { message: "Template não encontrado." };
+        }
+        
+        const template = templateSnap.data() as TurnoTemplate;
+        const batch = writeBatch(firestore);
+        const turnosCollection = collection(firestore, "turnos");
+        const duracaoEmDias = differenceInDays(dataFim, dataInicio);
 
-    const querySnapshot = await getDocs(q);
-    return !querySnapshot.empty;
+        for (let i = 0; i <= duracaoEmDias; i++) {
+            const diaAtual = addDays(dataInicio, i);
+            let criarTurnoNesteDia = false;
+
+            if (template.type === 'ciclo') {
+                const config = template.config as CicloConfig;
+                const cicloTotal = config.trabalha + config.folga;
+                const contadorCiclo = i % cicloTotal;
+                if (contadorCiclo < config.trabalha) {
+                    criarTurnoNesteDia = true;
+                }
+            } else if (template.type === 'fixo') {
+                const config = template.config as FixoConfig;
+                const diaDaSemana = diaAtual.getDay(); // Domingo = 0, Segunda = 1...
+                if (config.dias.some(diaConfig => diaMap[diaConfig] === diaDaSemana)) {
+                    criarTurnoNesteDia = true;
+                }
+            }
+            
+            if (criarTurnoNesteDia) {
+                const turnoRef = doc(turnosCollection);
+                const { inicio, fim } = criarDatasTurno(diaAtual, template.horarioInicio, template.horarioFim);
+                batch.set(turnoRef, {
+                    postoId: postoId,
+                    startDateTime: Timestamp.fromDate(inicio),
+                    endDateTime: Timestamp.fromDate(fim),
+                    status: "vago",
+                });
+            }
+        }
+        await batch.commit();
+    } catch (error) {
+        console.error("Erro ao gerar turnos:", error);
+        return { message: "Ocorreu um erro no servidor." };
+    }
+
+    revalidatePath("/escalas");
+    return { success: true, message: "Turnos gerados com sucesso!" };
 }
 
 export async function preencherEscalaAutomaticamente(prevState: any, formData: FormData) {
@@ -80,27 +219,20 @@ export async function preencherEscalaAutomaticamente(prevState: any, formData: F
     });
 
     const validatedFields = schema.safeParse(Object.fromEntries(formData.entries()));
-    if (!validatedFields.success) {
-        return { message: "Dados inválidos." };
-    }
+    if (!validatedFields.success) { return { message: "Dados inválidos." }; }
 
     const { vigilanteId, postoId, templateId, dataInicio: dataInicioStr, dataFim: dataFimStr } = validatedFields.data;
     const dataInicio = new Date(`${dataInicioStr}T00:00:00`);
     const dataFim = new Date(`${dataFimStr}T00:00:00`);
 
-    if (dataInicio > dataFim) {
-        return { message: "A data de início não pode ser posterior à data de fim." };
-    }
+    if (dataInicio > dataFim) { return { message: "A data de início não pode ser posterior à data de fim." }; }
 
     try {
         const templateRef = doc(firestore, "turnoTemplates", templateId);
         const templateSnap = await getDoc(templateRef);
-        if (!templateSnap.exists() || templateSnap.data().type !== 'ciclo') {
-            return { message: "Template de ciclo inválido." };
-        }
-
-        const config = templateSnap.data().config as { trabalha: number; folga: number; };
-        const cicloTotal = config.trabalha + config.folga;
+        if (!templateSnap.exists()) { return { message: "Template inválido." }; }
+        
+        const template = templateSnap.data() as TurnoTemplate;
         const duracaoEmDias = differenceInDays(dataFim, dataInicio);
         const batch = writeBatch(firestore);
         const turnosCollection = collection(firestore, "turnos");
@@ -108,24 +240,27 @@ export async function preencherEscalaAutomaticamente(prevState: any, formData: F
 
         for (let i = 0; i <= duracaoEmDias; i++) {
             const diaAtual = addDays(dataInicio, i);
-            const contadorCiclo = i % cicloTotal;
+            let criarTurnoNesteDia = false;
+            
+            if (template.type === 'ciclo') {
+                const config = template.config as CicloConfig;
+                if (i % (config.trabalha + config.folga) < config.trabalha) criarTurnoNesteDia = true;
+            } else if (template.type === 'fixo') {
+                const config = template.config as FixoConfig;
+                if (config.dias.some(dia => diaMap[dia] === diaAtual.getDay())) criarTurnoNesteDia = true;
+            }
 
-            if (contadorCiclo < config.trabalha) {
-                // VERIFICAÇÃO DE CONFLITO ANTES DE CRIAR O TURNO
+            if (criarTurnoNesteDia) {
                 if (await isVigilanteOcupado(vigilanteId, diaAtual)) {
                     conflitosEncontrados++;
-                    continue; // Pula este dia, pois o vigilante já está ocupado
+                    continue;
                 }
-
                 const turnoRef = doc(turnosCollection);
-                const inicioTurno = new Date(diaAtual); inicioTurno.setHours(6, 0, 0, 0);
-                const fimTurno = new Date(diaAtual); fimTurno.setHours(18, 0, 0, 0);
-
+                const { inicio, fim } = criarDatasTurno(diaAtual, template.horarioInicio, template.horarioFim);
                 batch.set(turnoRef, {
-                    postoId,
-                    vigilanteId,
-                    startDateTime: Timestamp.fromDate(inicioTurno),
-                    endDateTime: Timestamp.fromDate(fimTurno),
+                    postoId, vigilanteId,
+                    startDateTime: Timestamp.fromDate(inicio),
+                    endDateTime: Timestamp.fromDate(fim),
                     status: "preenchido",
                 });
             }
@@ -135,7 +270,7 @@ export async function preencherEscalaAutomaticamente(prevState: any, formData: F
 
         let successMessage = "Escala preenchida com sucesso!";
         if (conflitosEncontrados > 0) {
-            successMessage += ` (${conflitosEncontrados} dia(s) foram ignorados por conflito de escala).`;
+            successMessage += ` (${conflitosEncontrados} dia(s) ignorados por conflito).`;
         }
 
         revalidatePath("/escalas");
@@ -151,13 +286,9 @@ export async function alocarVigilante(turnoId: string, vigilanteId: string, data
         if (await isVigilanteOcupado(vigilanteId, dataDoTurno)) {
             return { success: false, message: "Este vigilante já está escalado neste dia." };
         }
-
         const turnoRef = doc(firestore, "turnos", turnoId);
-        await updateDoc(turnoRef, {
-            vigilanteId: vigilanteId,
-            status: "preenchido",
-        });
-
+        await updateDoc(turnoRef, { vigilanteId: vigilanteId, status: "preenchido" });
+        revalidatePath("/escalas");
         return { success: true, message: "Vigilante alocado com sucesso!" };
     } catch (error) {
         console.error("Erro ao alocar vigilante:", error);
@@ -172,6 +303,7 @@ export async function desalocarVigilante(turnoId: string) {
             vigilanteId: null,
             status: "vago",
         });
+        revalidatePath("/escalas");
         return { success: true, message: "Vigilante desalocado com sucesso!" };
     } catch (error) {
         console.error("Erro ao desalocar vigilante:", error);
@@ -190,91 +322,20 @@ export async function criarEAlocarTurno(
         }
 
         const turnosCollection = collection(firestore, "turnos");
-        const inicioTurno = new Date(dataDoTurno);
-        inicioTurno.setHours(6, 0, 0, 0);
-        const fimTurno = new Date(dataDoTurno);
-        fimTurno.setHours(18, 0, 0, 0);
+        const { inicio, fim } = criarDatasTurno(dataDoTurno, "07:00", "19:00"); // Horário Padrão
 
         const docRef = await addDoc(turnosCollection, {
             postoId,
             vigilanteId,
-            startDateTime: Timestamp.fromDate(inicioTurno),
-            endDateTime: Timestamp.fromDate(fimTurno),
+            startDateTime: Timestamp.fromDate(inicio),
+            endDateTime: Timestamp.fromDate(fim),
             status: "preenchido",
         });
 
+        revalidatePath("/escalas");
         return { success: true, message: "Turno criado e alocado com sucesso.", newTurnoId: docRef.id };
     } catch (error) {
         console.error("Erro ao criar e alocar turno:", error);
         return { success: false, message: "Erro ao criar o turno." };
     }
-}
-
-export async function gerarTurnos(prevState: any, formData: FormData) {
-    const validatedFields = GerarTurnosSchema.safeParse({
-        postoId: formData.get("postoId"),
-        templateId: formData.get("templateId"),
-        dataInicio: formData.get("dataInicio"),
-        dataFim: formData.get("dataFim"),
-    });
-
-    if (!validatedFields.success) {
-        return { message: "Dados inválidos. Por favor, preencha todos os campos." };
-    }
-
-    const { postoId, templateId, dataInicio: dataInicioStr, dataFim: dataFimStr } = validatedFields.data;
-
-    const dataInicio = new Date(`${dataInicioStr}T00:00:00`);
-    const dataFim = new Date(`${dataFimStr}T00:00:00`);
-
-    if (dataInicio > dataFim) {
-        return { message: "A data de início não pode ser posterior à data de fim." };
-    }
-
-    try {
-        const templateRef = doc(firestore, "turnoTemplates", templateId);
-        const templateSnap = await getDoc(templateRef);
-
-        if (!templateSnap.exists() || templateSnap.data().type !== 'ciclo') {
-            return { message: "Template de ciclo inválido ou não encontrado." };
-        }
-
-        const config = templateSnap.data().config as CicloConfig;
-        const cicloTotal = config.trabalha + config.folga;
-        const batch = writeBatch(firestore);
-        const turnosCollection = collection(firestore, "turnos");
-        
-        const duracaoEmDias = differenceInDays(dataFim, dataInicio);
-
-        for (let i = 0; i <= duracaoEmDias; i++) {
-            const diaAtual = addDays(dataInicio, i);
-            const contadorCiclo = i % cicloTotal;
-
-            if (contadorCiclo < config.trabalha) {
-                const turnoRef = doc(turnosCollection);
-                
-                const inicioTurno = new Date(diaAtual);
-                inicioTurno.setHours(6, 0, 0, 0);
-
-                const fimTurno = new Date(diaAtual);
-                fimTurno.setHours(18, 0, 0, 0);
-
-                batch.set(turnoRef, {
-                    postoId: postoId,
-                    startDateTime: Timestamp.fromDate(inicioTurno),
-                    endDateTime: Timestamp.fromDate(fimTurno),
-                    status: "vago",
-                });
-            }
-        }
-
-        await batch.commit();
-
-    } catch (error) {
-        console.error("Erro ao gerar turnos:", error);
-        return { message: "Ocorreu um erro no servidor ao tentar gerar os turnos." };
-    }
-
-    revalidatePath("/escalas");
-    return { success: true, message: "Turnos gerados com sucesso!" };
 }
